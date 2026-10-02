@@ -1,6 +1,7 @@
 """Week 4 - MovieLens ratings analysis.
 
-Answers four questions with one chart each (saved to charts/):
+Answers four questions with one chart each. Run directly to save PNGs to
+charts/, or import the q1-q4 figure builders (app.py does this):
   Q1  Genre breakdown           -> charts/q1_genre_breakdown.png
   Q2  Genre satisfaction        -> charts/q2_genre_satisfaction.png
   Q3  Ratings over release year -> charts/q3_ratings_over_time.png
@@ -14,7 +15,6 @@ import pandas as pd
 
 DATA = Path(__file__).parent / "movie_ratings.csv"
 OUT = Path(__file__).parent / "charts"
-OUT.mkdir(exist_ok=True)
 
 # --- Palette & style -------------------------------------------------------
 SURFACE = "#fcfcfb"
@@ -61,6 +61,7 @@ def suptitle(fig, title, subtitle):
 
 
 def save(fig, name):
+    OUT.mkdir(exist_ok=True)
     fig.savefig(OUT / name, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  saved charts/{name}")
@@ -114,17 +115,20 @@ def q1():
     ax2.grid(axis="x", visible=False)
 
     fig.subplots_adjust(top=0.84)
-    save(fig, "q1_genre_breakdown.png")
-
-    print(f"  Drama {by_genre['Drama']} ({by_genre['Drama'] / n_movies:.0%}), "
-          f"Comedy {by_genre['Comedy']}; multi-genre share {multi_share:.1%}")
+    return fig
 
 
 # --- Q2: Genre satisfaction ------------------------------------------------
-def q2():
+def genre_stats():
+    """Mean rating, rating count and 95% CI half-width per genre, lowest mean first."""
     g = (rating_genres.groupby("genre").rating
          .agg(mean="mean", n="count", sd="std").sort_values("mean"))
     g["ci"] = 1.96 * g.sd / np.sqrt(g.n)
+    return g
+
+
+def q2():
+    g = genre_stats()
     top3, bottom3 = g.index[-3:], g.index[:3]
     colors = [BLUE if x in top3 else ORANGE if x in bottom3 else NEUTRAL for x in g.index]
 
@@ -154,14 +158,11 @@ def q2():
     ax.legend(handles=handles, loc="lower right")
 
     fig.subplots_adjust(top=0.86)
-    save(fig, "q2_genre_satisfaction.png")
-    print("  highest:", ", ".join(f"{k} {v:.2f}" for k, v in g["mean"][::-1][:3].items()))
-    print("  lowest: ", ", ".join(f"{k} {v:.2f}" for k, v in g["mean"][:3].items()))
+    return fig
 
 
 # --- Q3: Ratings over release year -----------------------------------------
-def q3():
-    MIN_N = 50
+def q3(MIN_N=50):
     yearly = (df.dropna(subset=["year"]).groupby("year").rating
               .agg(mean="mean", n="count"))
     solid = yearly[yearly.n >= MIN_N]
@@ -208,31 +209,39 @@ def q3():
              ha="right", va="top", fontsize=9, color=INK_2)
 
     fig.subplots_adjust(top=0.84)
-    save(fig, "q3_ratings_over_time.png")
-    print("  decade means:", ", ".join(f"{int(k)}s {v:.2f}" for k, v in decade.items()))
-    print(f"  r(year, mean) over years with >={MIN_N} ratings: "
-          f"{np.corrcoef(solid.index, solid['mean'])[0, 1]:.2f}")
+    return fig
 
 
 # --- Q4: Top 5 with a ratings floor ----------------------------------------
-def q4():
-    stats = (df.groupby("movie_id")
-             .agg(title=("title", "first"), mean=("rating", "mean"), n=("rating", "count")))
-    top = {f: stats[stats.n >= f].sort_values("mean", ascending=False).head(5) for f in (50, 150)}
-    both = set(top[50].index) & set(top[150].index)
+movie_stats = (df.groupby("movie_id")
+               .agg(title=("title", "first"), mean=("rating", "mean"), n=("rating", "count")))
+
+
+def top_movies(floor, k=5):
+    return movie_stats[movie_stats.n >= floor].sort_values("mean", ascending=False).head(k)
+
+
+def q4(floors=(50, 150)):
+    stats = movie_stats
+    lo_f, hi_f = sorted(floors)
+    top = {f: top_movies(f) for f in (lo_f, hi_f)}
+    both = set(top[lo_f].index) & set(top[hi_f].index)
+    swapped = len(top[lo_f]) - len(both)
+    means = pd.concat(top.values())["mean"]
+    x_min = np.floor((means.min() - 0.1) * 10) / 10
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 4.2), sharex=True,
                              gridspec_kw={"wspace": 0.75})
     suptitle(fig, "Q4 · Top 5 movies by mean rating, at two minimum-ratings floors",
-             "Raising the floor from 50 to 150 ratings swaps out 3 of the top 5. "
+             f"Raising the floor from {lo_f} to {hi_f} ratings swaps out {swapped} of the top 5. "
              "Blue = in the top 5 at both floors, orange = in the top 5 at this floor only.")
 
-    for ax, floor in zip(axes, (50, 150)):
+    for ax, floor in zip(axes, (lo_f, hi_f)):
         t = top[floor].iloc[::-1]
         eligible = (stats.n >= floor).sum()
         colors = [BLUE if mid in both else ORANGE for mid in t.index]
         y = np.arange(len(t))
-        ax.hlines(y, 4.0, t["mean"], color=GRID, lw=2)
+        ax.hlines(y, x_min, t["mean"], color=GRID, lw=2)
         ax.scatter(t["mean"], y, s=90, color=colors, edgecolor=SURFACE, lw=2, zorder=3)
         for yi, (_, r) in zip(y, t.iterrows()):
             ax.text(r["mean"] + 0.025, yi, f"{r['mean']:.2f}  (n={r.n})",
@@ -241,18 +250,14 @@ def q4():
         ax.tick_params(axis="y", length=0)
         ax.grid(axis="y", visible=False)
         ax.set_title(f"Floor: ≥{floor} ratings   ({eligible} movies qualify)")
-        ax.set_xlim(4.0, 4.85)
-        ax.set_xlabel("Mean rating (axis starts at 4.0)")
+        ax.set_xlim(x_min, means.max() + 0.35)
+        ax.set_xlabel(f"Mean rating (axis starts at {x_min:.1f})")
 
     fig.subplots_adjust(top=0.72)
-    save(fig, "q4_top_movies_floor.png")
-    for f, t in top.items():
-        print(f"  floor {f}:")
-        for _, r in t.iterrows():
-            print(f"    {r['mean']:.3f}  n={r.n:<4} {r.title}")
+    return fig
 
 
 if __name__ == "__main__":
-    for fn in (q1, q2, q3, q4):
-        print(fn.__name__.upper())
-        fn()
+    for fn, name in ((q1, "q1_genre_breakdown.png"), (q2, "q2_genre_satisfaction.png"),
+                     (q3, "q3_ratings_over_time.png"), (q4, "q4_top_movies_floor.png")):
+        save(fn(), name)
