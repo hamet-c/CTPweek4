@@ -4,7 +4,7 @@ An analysis of the [MovieLens 100k](https://grouplens.org/datasets/movielens/100
 100,000 ratings (1–5 stars) from 943 users on 1,682 movies, collected in 1997–98.
 It answers four questions with charts, and an interactive Streamlit dashboard presents them.
 
-![Dashboard overview](https://ctpweek4-ckfhenstykjhdqhwchaee4.streamlit.app/)
+https://ctpweek4-ckfhenstykjhdqhwchaee4.streamlit.app/
 
 ## Questions & findings
 
